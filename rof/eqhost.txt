@@ -1,0 +1,2 @@
+[LoginServer]
+Host=login.projecteq.net:5999

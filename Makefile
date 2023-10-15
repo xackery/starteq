@@ -51,6 +51,7 @@ build-linux:
 .PHONY: build-windows
 build-windows:
 	@echo "Building Windows ${VERSION}"
+	mkdir -p bin
 	go install github.com/akavel/rsrc@latest
 	rsrc -ico starteq.ico -manifest starteq.exe.manifest
 	cp starteq.exe.manifest bin/

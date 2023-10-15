@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"image/png"
+	"strings"
 	"sync"
 
 	"github.com/xackery/launcheq/config"
@@ -195,7 +196,9 @@ func Logf(format string, a ...interface{}) {
 		gui.splash.SetVisible(false)
 	}
 	if !isAutoMode {
-		gui.log.SetText(fmt.Sprintf(format, a...))
+		//convert \n to \r\n
+		format = strings.ReplaceAll(format, "\n", "\r\n")
+		gui.log.AppendText(fmt.Sprintf(format, a...))
 	}
 }
 
@@ -240,4 +243,47 @@ func IsAutoPlay() bool {
 		return false
 	}
 	return gui.isAutoPlay.Checked()
+}
+
+func SetMaxProgress(value int) {
+	mu.Lock()
+	defer mu.Unlock()
+	if gui == nil {
+		return
+	}
+	gui.progress.SetRange(0, value)
+}
+
+func SetProgress(value int) {
+	mu.Lock()
+	defer mu.Unlock()
+	if gui == nil {
+		return
+	}
+	gui.progress.SetValue(value)
+}
+
+func MessageBox(title string, message string, isError bool) {
+	mu.Lock()
+	defer mu.Unlock()
+	if gui == nil {
+		return
+	}
+	// convert style to msgboxstyle
+	icon := walk.MsgBoxIconInformation
+	if isError {
+		icon = walk.MsgBoxIconError
+	}
+	walk.MsgBox(gui.mw, title, message, icon)
+}
+
+func MessageBoxf(title string, format string, a ...interface{}) {
+	mu.Lock()
+	defer mu.Unlock()
+	if gui == nil {
+		return
+	}
+	// convert style to msgboxstyle
+	icon := walk.MsgBoxIconInformation
+	walk.MsgBox(gui.mw, title, fmt.Sprintf(format, a...), icon)
 }

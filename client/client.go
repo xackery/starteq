@@ -127,6 +127,7 @@ func (c *Client) Patch() {
 
 	gui.SetPatchMode(true)
 	defer gui.SetPatchMode(false)
+	gui.SetProgress(0)
 
 	_, err := os.Stat("eqgame.exe")
 	if err != nil {
@@ -360,6 +361,9 @@ func (c *Client) patch() error {
 		c.log("Total patch size: %s, version: %s", generateSize(int(totalSize)), fileList.Version[0:8])
 	}
 
+	ratio := float64(totalSize / 100)
+	gui.SetProgress(0)
+
 	for _, entry := range fileList.Downloads {
 		if strings.Contains(entry.Name, "..") {
 			c.log("Skipping %s, has .. inside it", entry.Name)
@@ -382,6 +386,7 @@ func (c *Client) patch() error {
 				}
 				totalDownloaded += int64(entry.Size)
 				progressSize += int64(entry.Size)
+				gui.SetProgress(int(ratio * float64(progressSize)))
 				c.isPatched = true
 				continue
 			}
@@ -396,6 +401,7 @@ func (c *Client) patch() error {
 		if hash == entry.Md5 {
 			c.log("%s skipped (up to date)", entry.Name)
 			progressSize += int64(entry.Size)
+			gui.SetProgress(int(ratio * float64(progressSize)))
 			continue
 		}
 
@@ -405,6 +411,7 @@ func (c *Client) patch() error {
 		}
 		progressSize += int64(entry.Size)
 		totalDownloaded += int64(entry.Size)
+		gui.SetProgress(int(ratio * float64(progressSize)))
 		c.isPatched = true
 	}
 
@@ -431,6 +438,7 @@ func (c *Client) patch() error {
 		}
 		c.log("%s removed", entry.Name)
 	}
+	gui.SetProgress(100)
 
 	c.cfg.Version = fileList.Version
 	err = c.cfg.Save()

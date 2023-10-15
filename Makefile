@@ -1,7 +1,7 @@
-NAME ?= launcheq
+NAME ?= starteq
 VERSION ?= 0.0.9
-FILELIST_URL ?= https://raw.githubusercontent.com/xackery/launcheq/rof
-PATCHER_URL ?= https://github.com/xackery/launcheq/releases/latest/download/
+FILELIST_URL ?= https://raw.githubusercontent.com/xackery/starteq/rof
+PATCHER_URL ?= https://github.com/xackery/starteq/releases/latest/download/
 
 # CICD triggers this
 .PHONY: set-variable
@@ -31,7 +31,7 @@ run: sanitize
 
 #go install github.com/tc-hib/go-winres@latest
 bundle:
-	go-winres simply --icon launcheq.png
+	go-winres simply --icon starteq.png
 
 .PHONY: build-all
 build-all: sanitize build-prepare build-linux build-darwin build-windows	
@@ -52,5 +52,6 @@ build-linux:
 build-windows:
 	@echo "Building Windows ${VERSION}"
 	go install github.com/akavel/rsrc@latest
-	rsrc -ico launcheq.ico -manifest launcheq.exe.manifest
+	rsrc -ico starteq.ico -manifest starteq.exe.manifest
+	cp starteq.exe.manifest bin/
 	GOOS=windows GOARCH=amd64 go build -buildmode=pie -ldflags="-X main.Version=${VERSION} -X main.PatcherUrl=${PATCHER_URL} -s -w" -o bin/${NAME}.exe

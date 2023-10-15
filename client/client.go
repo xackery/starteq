@@ -66,8 +66,8 @@ func New(ctx context.Context, cancel context.CancelFunc, cfg *config.Config, ver
 		return nil, fmt.Errorf("wd invalid: %w", err)
 	}
 
-	gui.SubscribePatchButton(c.Patch)
-	gui.SubscribePlayButton(c.Play)
+	gui.SubscribePatchButton(func() { c.Patch() })
+	gui.SubscribePlayButton(func() { c.Play() })
 	gui.SubscribeAutoPatch(func() {
 		c.cfg.IsAutoPatch = gui.IsAutoPatch()
 		c.cfg.Save()
@@ -81,12 +81,17 @@ func New(ctx context.Context, cancel context.CancelFunc, cfg *config.Config, ver
 }
 
 // AutoPlay will automatically patch then play the game. It is designed to be called after New
-func (c *Client) AutoPlay() {
+func (c *Client) AutoPlay() error {
 	gui.SetAutoMode(true)
 	defer gui.SetAutoMode(false)
+
+	isCleanAutoPlay := true
 	if c.cfg.IsAutoPatch {
 		fmt.Println("Autopatch is enabled, patching...")
-		c.Patch()
+		err := c.Patch()
+		if err != nil {
+			isCleanAutoPlay = false
+		}
 	}
 
 	if c.cfg.IsAutoPlay {
@@ -95,12 +100,20 @@ func (c *Client) AutoPlay() {
 			c.log("Since files were patched, waiting 5 seconds before launching EverQuest")
 			time.Sleep(5 * time.Second)
 		}
-		c.Play()
+		err := c.Play()
+		if err != nil {
+			c.log("Failed to play: %s", err)
+			isCleanAutoPlay = false
+		}
 	}
 	fmt.Println("Autoplay complete")
+	if isCleanAutoPlay {
+		return nil
+	}
+	return fmt.Errorf("autoplay finished with errors")
 }
 
-func (c *Client) Play() {
+func (c *Client) Play() error {
 	gui.LogClear()
 	c.log("Launching EverQuest from %s", c.currentPath)
 	username, err := c.fetchUsername()
@@ -115,13 +128,34 @@ func (c *Client) Play() {
 	cmd.Dir = c.currentPath
 	err = cmd.Start()
 	if err != nil {
-		gui.Logf("Failed to run eqgame.exe: %s", err)
-		return
+		return fmt.Errorf("start eqgame.exe: %w", err)
 	}
 
+	time.Sleep(1000 * time.Millisecond)
+	isStarted := false
+	// poll for process to be started
+	for i := 0; i < 10; i++ {
+		if cmd.Process == nil {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		// check if process is running
+		_, err := os.FindProcess(cmd.Process.Pid)
+		if err != nil {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		isStarted = true
+		c.logf("EverQuest started with process ID %d\n", cmd.Process.Pid)
+		break
+	}
+	if !isStarted {
+		return fmt.Errorf("failed to start eqgame.exe")
+	}
+	return nil
 }
 
-func (c *Client) Patch() {
+func (c *Client) Patch() error {
 	start := time.Now()
 	gui.LogClear()
 
@@ -132,13 +166,13 @@ func (c *Client) Patch() {
 	_, err := os.Stat("eqgame.exe")
 	if err != nil {
 		c.log("eqgame.exe must be in the same directory as %s.", c.baseName)
-		return
+		return fmt.Errorf("stat failed")
 	}
 
 	err = c.selfUpdateAndPatch()
 	if err != nil {
 		c.log("Failed to self update and patch: %s", err)
-		return
+		return fmt.Errorf("self update and patch: %w", err)
 	}
 
 	if c.isPatched {
@@ -146,7 +180,7 @@ func (c *Client) Patch() {
 	}
 
 	c.log("Finished in %0.2f seconds", time.Since(start).Seconds())
-
+	return nil
 }
 
 func (c *Client) selfUpdateAndPatch() error {

@@ -55,4 +55,4 @@ build-windows:
 	go install github.com/akavel/rsrc@latest
 	rsrc -ico starteq.ico -manifest starteq.exe.manifest
 	cp starteq.exe.manifest bin/
-	GOOS=windows GOARCH=amd64 go build -ldflags -H=windowsgui -buildmode=pie -ldflags="-X main.Version=${VERSION} -X main.PatcherUrl=${PATCHER_URL} -s -w" -o bin/${NAME}.exe
+	GOOS=windows GOARCH=amd64 go build -buildmode=pie -ldflags="-X main.Version=${VERSION} -X main.PatcherUrl=${PATCHER_URL} -s -w -H=windowsgui" -o bin/${NAME}.exe

@@ -79,7 +79,13 @@ func main() {
 		os.Exit(0)
 	}()
 
-	c.AutoPlay()
+	err = c.AutoPlay()
+	if err == nil {
+		// no gui needed if auto play worked with zero errors
+		fmt.Println("Autoplay worked cleanly, exiting")
+		return
+	}
+
 	errCode := gui.Run()
 	if errCode != 0 {
 		fmt.Println("Failed to run:", errCode)

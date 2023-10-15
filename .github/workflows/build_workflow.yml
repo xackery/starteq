@@ -41,8 +41,8 @@ jobs:
         cd rof
         wget --no-verbose https://github.com/xackery/filelistbuilder/releases/latest/download/filelistbuilder-linux-x64
         chmod +x filelistbuilder-linux-x64
-        ./filelistbuilder-linux-x64 "rof" "${{env.STORAGE_URL}}" "../bin/launcheq.exe"
-        mv eqemupatcher-hash.txt ../bin/launcheq-hash.txt
+        ./filelistbuilder-linux-x64 "rof" "${{env.STORAGE_URL}}" "../bin/starteq.exe"
+        mv eqemupatcher-hash.txt ../bin/starteq-hash.txt
 
     # - name: Update coverage
     #   run: |
@@ -64,6 +64,6 @@ jobs:
         prerelease: false
         title: "${{ env.VERSION }}.${{ github.run_number }}"
         files: |
-          bin/launcheq.exe
-          bin/launcheq-hash.txt
+          bin/starteq.exe
+          bin/starteq-hash.txt
           rof/filelist_rof.yml

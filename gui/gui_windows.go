@@ -50,7 +50,7 @@ func NewMainWindow(ctx context.Context, cancel context.CancelFunc, cfg *config.C
 	gui.mw.SetTitle("Start EQ (Client: Rain of Fear 2)")
 	gui.mw.SetMinMaxSize(walk.Size{Width: 305, Height: 371}, walk.Size{Width: 305, Height: 371})
 	gui.mw.SetLayout(walk.NewVBoxLayout())
-	gui.mw.SetVisible(true)
+	gui.mw.SetVisible(false)
 
 	// convert splash from byte slice to png
 	splashImg, err := png.Decode(bytes.NewReader(splash))
@@ -142,6 +142,7 @@ func Run() int {
 	if gui == nil {
 		return 1
 	}
+	gui.mw.SetVisible(true)
 	return gui.mw.Run()
 }
 
@@ -181,6 +182,15 @@ func SubscribeAutoPlay(fn func()) {
 		return
 	}
 	gui.isAutoPlay.CheckedChanged().Attach(fn)
+}
+
+func SubscribeClose(fn func(cancelled *bool, reason walk.CloseReason)) {
+	mu.Lock()
+	defer mu.Unlock()
+	if gui == nil {
+		return
+	}
+	gui.mw.Closing().Attach(fn)
 }
 
 // Logf logs a message to the gui
@@ -286,4 +296,22 @@ func MessageBoxf(title string, format string, a ...interface{}) {
 	// convert style to msgboxstyle
 	icon := walk.MsgBoxIconInformation
 	walk.MsgBox(gui.mw, title, fmt.Sprintf(format, a...), icon)
+}
+
+func SetTitle(title string) {
+	mu.Lock()
+	defer mu.Unlock()
+	if gui == nil {
+		return
+	}
+	gui.mw.SetTitle(title)
+}
+
+func Close() {
+	mu.Lock()
+	defer mu.Unlock()
+	if gui == nil {
+		return
+	}
+	gui.mw.Close()
 }

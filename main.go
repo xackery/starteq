@@ -12,6 +12,7 @@ import (
 	"github.com/xackery/launcheq/client"
 	"github.com/xackery/launcheq/config"
 	"github.com/xackery/launcheq/gui"
+	"github.com/xackery/wlk/walk"
 )
 
 //go:embed splash.png
@@ -49,11 +50,34 @@ func main() {
 	if Version == "" {
 		Version = "dev"
 	}
+
 	c, err := client.New(ctx, cancel, cfg, Version, PatcherUrl)
 	if err != nil {
 		gui.MessageBox("Error", "Failed to create client: "+err.Error(), true)
 		os.Exit(1)
 	}
+	defer c.DumpLog()
+
+	gui.SubscribeClose(func(canceled *bool, reason walk.CloseReason) {
+		if ctx.Err() != nil {
+			fmt.Println("Accepting exit")
+			return
+		}
+		*canceled = true
+		fmt.Println("Got close message")
+		gui.SetTitle("Closing...")
+		cancel()
+	})
+
+	go func() {
+		<-ctx.Done()
+		fmt.Println("Doing clean up process...")
+		gui.Close()
+		walk.App().Exit(0)
+		fmt.Println("Done, exiting")
+		c.DumpLog()
+		os.Exit(0)
+	}()
 
 	c.AutoPlay()
 	errCode := gui.Run()
@@ -62,5 +86,4 @@ func main() {
 		os.Exit(1)
 	}
 
-	<-ctx.Done()
 }

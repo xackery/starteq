@@ -88,8 +88,13 @@ func (c *Client) AutoPlay() {
 		fmt.Println("Autopatch is enabled, patching...")
 		c.Patch()
 	}
-	if c.isPatched && c.cfg.IsAutoPlay {
+
+	if c.cfg.IsAutoPlay {
 		fmt.Println("Autoplay is enabled, playing...")
+		if c.isPatched {
+			c.log("Since files were patched, waiting 5 seconds before launching EverQuest")
+			time.Sleep(5 * time.Second)
+		}
 		c.Play()
 	}
 	fmt.Println("Autoplay complete")
@@ -114,11 +119,6 @@ func (c *Client) Play() {
 		return
 	}
 
-	err = os.WriteFile(fmt.Sprintf("%s.txt", c.baseName), []byte(c.cacheLog), os.ModePerm)
-	if err != nil {
-		gui.Logf("Failed to write log: %s", err)
-		return
-	}
 }
 
 func (c *Client) Patch() {
@@ -143,9 +143,6 @@ func (c *Client) Patch() {
 
 	if c.isPatched {
 		c.log(c.patchSummary)
-		c.log("You can check %s.txt if you wish to review the patched files later.", c.baseName)
-		c.log("Since files were patched, waiting 5 seconds before launching EverQuest...")
-		time.Sleep(5 * time.Second)
 	}
 
 	c.log("Finished in %0.2f seconds", time.Since(start).Seconds())
@@ -535,4 +532,16 @@ func (c *Client) fetchUsername() (string, error) {
 		}
 	}
 	return "", nil
+}
+
+func (c *Client) DumpLog() error {
+	if len(c.cacheLog) == 0 {
+		return nil
+	}
+	err := os.WriteFile(fmt.Sprintf("%s.txt", c.baseName), []byte(c.cacheLog), os.ModePerm)
+	if err != nil {
+		return fmt.Errorf("write log: %w", err)
+	}
+	c.cacheLog = ""
+	return nil
 }

@@ -13,8 +13,10 @@
 *.syso
 # Dependency directories (remove the comment below to include it)
 # vendor/
-launcheq.txt
-launcheq.yml
-launcheq.bat
+starteq.txt
+starteq.yml
+starteq.bat
 bin
 *.yml
+
+.gocache/

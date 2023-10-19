@@ -12,12 +12,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xackery/launcheq/config"
-	"github.com/xackery/launcheq/gui"
+	"github.com/xackery/starteq/config"
+	"github.com/xackery/starteq/gui"
+	"github.com/xackery/starteq/slog"
 	"gopkg.in/yaml.v3"
 
 	"github.com/fynelabs/selfupdate"
 )
+
+var isMapsDownloaded bool
 
 // Client wraps the entire UI
 type Client struct {
@@ -27,13 +30,15 @@ type Client struct {
 	patcherUrl    string
 	currentPath   string
 	clientVersion string
-	isPatched     bool
+	isPatchEvent  bool // true when a file was downloaded/a patch occured
 	patchSummary  string
 	cfg           *config.Config
 	cacheFileList *FileList
 	version       string
 	cacheLog      string
 	httpClient    *http.Client
+	patchCtx      context.Context
+	patchCancel   context.CancelFunc
 }
 
 // New creates a new client
@@ -59,6 +64,9 @@ func New(ctx context.Context, cancel context.CancelFunc, cfg *config.Config, ver
 	if strings.Contains(c.baseName, ".") {
 		c.baseName = c.baseName[0:strings.Index(c.baseName, ".")]
 	}
+	if c.baseName == "" {
+		c.baseName = "starteq"
+	}
 
 	fmt.Printf("Starting %s %s\n", c.baseName, c.version)
 	c.currentPath, err = os.Getwd()
@@ -66,7 +74,12 @@ func New(ctx context.Context, cancel context.CancelFunc, cfg *config.Config, ver
 		return nil, fmt.Errorf("wd invalid: %w", err)
 	}
 
-	gui.SubscribePatchButton(func() { c.Patch() })
+	gui.SubscribePatchButton(func() {
+		err := c.Patch()
+		if err != nil {
+			slog.Print("Failed to patch: %s", err)
+		}
+	})
 	gui.SubscribePlayButton(func() { c.Play() })
 	gui.SubscribeAutoPatch(func() {
 		c.cfg.IsAutoPatch = gui.IsAutoPatch()
@@ -96,15 +109,18 @@ func (c *Client) AutoPlay() error {
 
 	if c.cfg.IsAutoPlay {
 		fmt.Println("Autoplay is enabled, playing...")
-		if c.isPatched {
-			c.log("Since files were patched, waiting 5 seconds before launching EverQuest")
+		if c.isPatchEvent {
+			slog.Print("Since files were patched, waiting 5 seconds before launching EverQuest")
 			time.Sleep(5 * time.Second)
 		}
 		err := c.Play()
 		if err != nil {
-			c.log("Failed to play: %s", err)
+			slog.Print("Failed to play: %s", err)
 			isCleanAutoPlay = false
 		}
+	}
+	if !c.cfg.IsAutoPatch || !c.cfg.IsAutoPlay {
+		return fmt.Errorf("autoplay disabled")
 	}
 	fmt.Println("Autoplay complete")
 	if isCleanAutoPlay {
@@ -115,10 +131,10 @@ func (c *Client) AutoPlay() error {
 
 func (c *Client) Play() error {
 	gui.LogClear()
-	c.log("Launching EverQuest from %s", c.currentPath)
+	slog.Print("Launching EverQuest from %s", c.currentPath)
 	username, err := c.fetchUsername()
 	if err != nil {
-		c.log("Failed grabbing username from eqlsPlayerData.ini: %s", err)
+		slog.Print("Failed grabbing username from eqlsPlayerData.ini: %s", err)
 		//this error is not critical
 	}
 	if username == "" {
@@ -146,7 +162,7 @@ func (c *Client) Play() error {
 			continue
 		}
 		isStarted = true
-		c.logf("EverQuest started with process ID %d\n", cmd.Process.Pid)
+		slog.Printf("EverQuest started with process ID %d\n", cmd.Process.Pid)
 		break
 	}
 	if !isStarted {
@@ -155,9 +171,73 @@ func (c *Client) Play() error {
 	return nil
 }
 
+func (c *Client) PrePatch() error {
+	fmt.Println("Applying prepatch")
+	_, err := os.Stat("eqgame.exe")
+	if err != nil {
+		rofPath := "everquest_rof2"
+		_, err = os.Stat(rofPath + "/eqgame.exe")
+		if err == nil {
+			err = c.CopyBackup(rofPath)
+			if err != nil {
+				return fmt.Errorf("copy from everquest_rof2: %w", err)
+			}
+			return nil
+		}
+		rofPath = "../everquest_rof2"
+		_, err = os.Stat(rofPath + "/eqgame.exe")
+		if err == nil {
+			err = c.CopyBackup(rofPath)
+			if err != nil {
+				return fmt.Errorf("copy from ../everquest_rof2: %w", err)
+			}
+			return nil
+		}
+
+		if !c.cfg.IsTorrentOK {
+			if !gui.MessageBoxYesNo("EverQuest not found", "EverQuest was not found in the current directory.\nUse torrent software to download it?") {
+				return fmt.Errorf("cancelled torrent download. Download EQ manually and place in current directory")
+			}
+			c.cfg.IsTorrentOK = true
+			err = c.cfg.Save()
+			if err != nil {
+				return fmt.Errorf("save config: %w", err)
+			}
+		}
+		err = c.Torrent(c.patchCtx)
+		if err != nil {
+			return fmt.Errorf("torrent: %w", err)
+		}
+		err = c.CopyBackup("everquest_rof2")
+		if err != nil {
+			return fmt.Errorf("copy from everquest_rof2: %w", err)
+		}
+	}
+	return nil
+}
+
 func (c *Client) Patch() error {
+	defer slog.Dump(c.baseName + ".txt")
+	if c.patchCtx != nil && c.patchCtx.Err() == nil {
+		slog.Print("Patch already in progress")
+		return fmt.Errorf("patch already in progress")
+	}
+
+	gui.SetPatchText("Cancel")
+	defer gui.SetPatchText("Patch")
+
 	start := time.Now()
 	gui.LogClear()
+	slog.Print("Starting patch...")
+
+	c.patchCtx, c.patchCancel = context.WithCancel(c.ctx)
+	defer c.patchCancel()
+	if !gui.IsAutoMode() {
+		err := c.PrePatch()
+		if err != nil {
+			return fmt.Errorf("prepatch: %w", err)
+		}
+	}
 
 	gui.SetPatchMode(true)
 	defer gui.SetPatchMode(false)
@@ -165,41 +245,54 @@ func (c *Client) Patch() error {
 
 	_, err := os.Stat("eqgame.exe")
 	if err != nil {
-		c.log("eqgame.exe must be in the same directory as %s.", c.baseName)
+		slog.Print("eqgame.exe must be in the same directory as %s.", c.baseName)
 		return fmt.Errorf("stat failed")
 	}
 
 	err = c.selfUpdateAndPatch()
 	if err != nil {
-		c.log("Failed to self update and patch: %s", err)
+		slog.Print("Failed to self update and patch: %s", err)
 		return fmt.Errorf("self update and patch: %w", err)
 	}
 
-	if c.isPatched {
-		c.log(c.patchSummary)
+	if c.isPatchEvent {
+		slog.Print(c.patchSummary)
 	}
 
-	c.log("Finished in %0.2f seconds", time.Since(start).Seconds())
+	slog.Print("Finished in %0.2f seconds", time.Since(start).Seconds())
 	return nil
 }
 
 func (c *Client) selfUpdateAndPatch() error {
 	var err error
 
+	select {
+	case <-c.patchCtx.Done():
+		return fmt.Errorf("patch cancelled")
+	default:
+	}
 	err = c.fetchFileList()
 	if err != nil {
-		c.log("Failed fetch file list, skipping: %s", err)
+		slog.Print("Failed fetch file list, skipping: %s", err)
 		return nil
 	}
-
+	select {
+	case <-c.patchCtx.Done():
+		return fmt.Errorf("patch cancelled")
+	default:
+	}
 	err = c.patch()
 	if err != nil {
 		return fmt.Errorf("patch: %w", err)
 	}
-
+	select {
+	case <-c.patchCtx.Done():
+		return fmt.Errorf("patch cancelled")
+	default:
+	}
 	err = c.selfUpdate()
 	if err != nil {
-		c.log("Failed self update, skipping: %s", err)
+		slog.Print("Failed self update, skipping: %s", err)
 	}
 
 	return nil
@@ -208,11 +301,11 @@ func (c *Client) selfUpdateAndPatch() error {
 func (c *Client) fetchFileList() error {
 	client := c.httpClient
 	url := fmt.Sprintf("%s/filelist_%s.yml", c.patcherUrl, c.clientVersion)
-	c.log("Downloading %s", url)
+	slog.Print("Downloading %s", url)
 	resp, err := client.Get(url)
 	if err != nil {
 		url := fmt.Sprintf("%s/%s/filelist_%s.yml", c.patcherUrl, c.clientVersion, c.clientVersion)
-		c.log("Downloading legacy %s", url)
+		slog.Print("Downloading legacy %s", url)
 		resp, err = client.Get(url)
 		if err != nil {
 			return fmt.Errorf("download %s: %w", url, err)
@@ -230,7 +323,7 @@ func (c *Client) fetchFileList() error {
 	if err != nil {
 		return fmt.Errorf("decode filelist: %w", err)
 	}
-	//c.log("patch version is", fileList.Version, "and we are version", c.cfg.ClientVersion)
+	//slog.Print("patch version is", fileList.Version, "and we are version", c.cfg.ClientVersion)
 	c.cacheFileList = fileList
 	return nil
 }
@@ -248,27 +341,27 @@ func (c *Client) selfUpdate() error {
 	err = os.Remove(baseName + ".bat")
 	if err != nil {
 		if !os.IsNotExist(err) {
-			c.log("Failed to remove %s.bat: %s", baseName, err)
+			slog.Print("Failed to remove %s.bat: %s", baseName, err)
 		}
 	} else {
-		c.log("Removed %s.bat", baseName)
+		slog.Print("Removed %s.bat", baseName)
 	}
 
 	err = os.Remove("." + baseName + ".exe.old")
 	if err != nil {
 		if !os.IsNotExist(err) {
-			c.log("Failed to remove .%s.exe.old: %s", baseName, err)
+			slog.Print("Failed to remove .%s.exe.old: %s", baseName, err)
 		}
 	} else {
-		c.log("Removed .%s.exe.old", baseName)
+		slog.Print("Removed .%s.exe.old", baseName)
 	}
 
 	myHash, err := md5Checksum(exeName)
 	if err != nil {
 		return fmt.Errorf("checksum: %w", err)
 	}
-	url := fmt.Sprintf("%s/launcheq-hash.txt", c.patcherUrl)
-	c.log("Checking for self update at %s", url)
+	url := fmt.Sprintf("%s/starteq-hash.txt", c.patcherUrl)
+	slog.Print("Checking for self update at %s", url)
 	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("download %s: %w", url, err)
@@ -287,19 +380,19 @@ func (c *Client) selfUpdate() error {
 	remoteHash := strings.TrimSpace(string(data))
 
 	if remoteHash == "Not Found" {
-		c.log("Remote site down, ignoring self update")
+		slog.Print("Remote site down, ignoring self update")
 		return nil
 	}
 
 	if strings.EqualFold(myHash, remoteHash) {
-		c.log("Self update not needed")
+		slog.Print("Self update not needed")
 		return nil
 	}
 
-	c.log("Updating %s... %s vs %s", c.baseName, myHash, remoteHash)
+	slog.Print("Updating %s... %s vs %s", c.baseName, myHash, remoteHash)
 
 	url = fmt.Sprintf("%s/%s.exe", c.patcherUrl, c.baseName)
-	c.log("Downloading %s at %s", c.baseName, url)
+	slog.Print("Downloading %s at %s", c.baseName, url)
 	resp, err = client.Get(url)
 	if err != nil {
 		return fmt.Errorf("get: %w", err)
@@ -308,7 +401,7 @@ func (c *Client) selfUpdate() error {
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("download %s responded %d (not 200)", url, resp.StatusCode)
 	}
-	c.log("Applying update (will be used next launch)")
+	slog.Print("Applying update (will be used next launch)")
 	err = selfupdate.Apply(resp.Body, selfupdate.Options{})
 	if err != nil {
 		return fmt.Errorf("apply: %w", err)
@@ -316,14 +409,14 @@ func (c *Client) selfUpdate() error {
 
 	//isErrored := false
 
-	// c.log("Creating %s.bat", c.baseName)
+	// slog.Print("Creating %s.bat", c.baseName)
 	// err = os.WriteFile(fmt.Sprintf("%s.bat", c.baseName), []byte(fmt.Sprintf("timeout 1\n%s.exe", c.baseName)), os.ModePerm)
 	// if err != nil {
 	// 	fmt.Printf("Failed to write %s.bat: %s\n", c.baseName, err)
 	// 	isErrored = true
 	// }
 
-	// c.log("Writing log")
+	// slog.Print("Writing log")
 	// err = os.WriteFile(fmt.Sprintf("%s.txt", c.baseName), []byte(c.cacheLog), os.ModePerm)
 	// if err != nil {
 	// 	fmt.Println("Failed to write log:", err)
@@ -345,20 +438,10 @@ func (c *Client) selfUpdate() error {
 	// 	os.Exit(1)
 	// }
 
-	// c.log("Successfully updated. Restarting %s and starting EverQuest...", c.baseName)
+	// slog.Print("Successfully updated. Restarting %s and starting EverQuest...", c.baseName)
 	// time.Sleep(1 * time.Second)
 	// os.Exit(0)
 	return nil
-}
-
-func (c *Client) log(format string, a ...interface{}) {
-	c.logf(format+"\n", a...)
-}
-
-func (c *Client) logf(format string, a ...interface{}) {
-	fmt.Printf(format, a...)
-	gui.Logf(format, a...)
-	c.cacheLog += fmt.Sprintf(format, a...)
 }
 
 func (c *Client) patch() error {
@@ -369,10 +452,10 @@ func (c *Client) patch() error {
 
 	if c.cfg.Version == fileList.Version {
 		if len(fileList.Version) < 8 {
-			c.log("We are up to date")
+			slog.Print("We are up to date")
 			return nil
 		}
-		c.log("We are up to date latest patch %s", fileList.Version[0:8])
+		slog.Print("We are up to date latest patch %s", fileList.Version[0:8])
 		return nil
 	}
 
@@ -387,17 +470,22 @@ func (c *Client) patch() error {
 	totalDownloaded := int64(0)
 
 	if len(fileList.Version) < 8 {
-		c.log("Total patch size: %s", generateSize(int(totalSize)))
+		slog.Print("Total patch size: %s", generateSize(int(totalSize)))
 	} else {
-		c.log("Total patch size: %s, version: %s", generateSize(int(totalSize)), fileList.Version[0:8])
+		slog.Print("Total patch size: %s, version: %s", generateSize(int(totalSize)), fileList.Version[0:8])
 	}
 
 	ratio := float64(totalSize / 100)
 	gui.SetProgress(0)
 
 	for _, entry := range fileList.Downloads {
+		select {
+		case <-c.patchCtx.Done():
+			return fmt.Errorf("patch cancelled")
+		default:
+		}
 		if strings.Contains(entry.Name, "..") {
-			c.log("Skipping %s, has .. inside it", entry.Name)
+			slog.Print("Skipping %s, has .. inside it", entry.Name)
 			continue
 		}
 
@@ -418,7 +506,7 @@ func (c *Client) patch() error {
 				totalDownloaded += int64(entry.Size)
 				progressSize += int64(entry.Size)
 				gui.SetProgress(int(ratio * float64(progressSize)))
-				c.isPatched = true
+				c.isPatchEvent = true
 				continue
 			}
 			return fmt.Errorf("stat %s: %w", entry.Name, err)
@@ -430,7 +518,7 @@ func (c *Client) patch() error {
 		}
 
 		if hash == entry.Md5 {
-			c.log("%s skipped (up to date)", entry.Name)
+			slog.Print("%s skipped (up to date)", entry.Name)
 			progressSize += int64(entry.Size)
 			gui.SetProgress(int(ratio * float64(progressSize)))
 			continue
@@ -443,12 +531,12 @@ func (c *Client) patch() error {
 		progressSize += int64(entry.Size)
 		totalDownloaded += int64(entry.Size)
 		gui.SetProgress(int(ratio * float64(progressSize)))
-		c.isPatched = true
+		c.isPatchEvent = true
 	}
 
 	for _, entry := range fileList.Deletes {
 		if strings.Contains(entry.Name, "..") {
-			c.log("Skipping %s, has .. inside it", entry.Name)
+			slog.Print("Skipping %s, has .. inside it", entry.Name)
 			continue
 		}
 		fi, err := os.Stat(entry.Name)
@@ -459,22 +547,22 @@ func (c *Client) patch() error {
 			return fmt.Errorf("stat %s: %w", entry.Name, err)
 		}
 		if fi.IsDir() {
-			c.log("Skipping deleting %s, it is a directory", entry.Name)
+			slog.Print("Skipping deleting %s, it is a directory", entry.Name)
 			continue
 		}
 		err = os.Remove(entry.Name)
 		if err != nil {
-			c.log("Failed to delete %s: %s", entry.Name, err)
+			slog.Print("Failed to delete %s: %s", entry.Name, err)
 			continue
 		}
-		c.log("%s removed", entry.Name)
+		slog.Print("%s removed", entry.Name)
 	}
 	gui.SetProgress(100)
 
 	c.cfg.Version = fileList.Version
 	err = c.cfg.Save()
 	if err != nil {
-		c.log("Failed to save version to %s.ini: %s", c.baseName, err)
+		slog.Print("Failed to save version to %s.ini: %s", c.baseName, err)
 	}
 
 	if totalDownloaded == 0 {
@@ -487,7 +575,7 @@ func (c *Client) patch() error {
 }
 
 func (c *Client) downloadPatchFile(entry FileEntry) error {
-	c.log("%s (%s)", entry.Name, generateSize(entry.Size))
+	slog.Print("%s (%s)", entry.Name, generateSize(entry.Size))
 	w, err := os.Create(entry.Name)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", entry.Name, err)
@@ -568,14 +656,12 @@ func (c *Client) fetchUsername() (string, error) {
 	return "", nil
 }
 
-func (c *Client) DumpLog() error {
-	if len(c.cacheLog) == 0 {
-		return nil
+func (c *Client) Done() error {
+	if c.cancel != nil {
+		c.cancel()
 	}
-	err := os.WriteFile(fmt.Sprintf("%s.txt", c.baseName), []byte(c.cacheLog), os.ModePerm)
-	if err != nil {
-		return fmt.Errorf("write log: %w", err)
+	if c.patchCancel != nil {
+		c.patchCancel()
 	}
-	c.cacheLog = ""
 	return nil
 }

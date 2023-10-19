@@ -9,9 +9,10 @@ import (
 
 	_ "embed"
 
-	"github.com/xackery/launcheq/client"
-	"github.com/xackery/launcheq/config"
-	"github.com/xackery/launcheq/gui"
+	"github.com/xackery/starteq/client"
+	"github.com/xackery/starteq/config"
+	"github.com/xackery/starteq/gui"
+	"github.com/xackery/starteq/slog"
 	"github.com/xackery/wlk/walk"
 )
 
@@ -35,6 +36,9 @@ func main() {
 	if strings.Contains(baseName, ".") {
 		baseName = baseName[0:strings.Index(baseName, ".")]
 	}
+	if baseName == "" {
+		baseName = "starteq"
+	}
 	cfg, err := config.New(context.Background(), baseName)
 	if err != nil {
 		gui.MessageBox("Error", "Failed to load config: "+err.Error(), true)
@@ -56,7 +60,8 @@ func main() {
 		gui.MessageBox("Error", "Failed to create client: "+err.Error(), true)
 		os.Exit(1)
 	}
-	defer c.DumpLog()
+	defer slog.Dump(baseName + ".txt")
+	defer c.Done()
 
 	gui.SubscribeClose(func(canceled *bool, reason walk.CloseReason) {
 		if ctx.Err() != nil {
@@ -72,10 +77,11 @@ func main() {
 	go func() {
 		<-ctx.Done()
 		fmt.Println("Doing clean up process...")
+		c.Done() // close client
 		gui.Close()
 		walk.App().Exit(0)
 		fmt.Println("Done, exiting")
-		c.DumpLog()
+		slog.Dump(baseName + ".txt")
 		os.Exit(0)
 	}()
 
@@ -85,6 +91,7 @@ func main() {
 		fmt.Println("Autoplay worked cleanly, exiting")
 		return
 	}
+	slog.Dump(baseName + ".txt")
 
 	errCode := gui.Run()
 	if errCode != 0 {

@@ -15,6 +15,7 @@ type Config struct {
 	baseName    string
 	IsAutoPlay  bool
 	IsAutoPatch bool
+	IsTorrentOK bool
 }
 
 // New creates a new configuration
@@ -109,6 +110,14 @@ func decode(r io.Reader, cfg *Config) error {
 			if value == "1" {
 				cfg.IsAutoPlay = true
 			}
+		case "torrent_ok":
+			if strings.ToLower(value) == "true" {
+				cfg.IsTorrentOK = true
+			}
+			if value == "1" {
+				cfg.IsTorrentOK = true
+			}
+
 		}
 	}
 	return nil
@@ -188,6 +197,16 @@ func (c *Config) Save() error {
 				value = "false"
 			}
 			tmpConfig.IsAutoPlay = true
+		case "torrent_ok":
+			if tmpConfig.IsTorrentOK {
+				continue
+			}
+			if c.IsTorrentOK {
+				value = "true"
+			} else {
+				value = "false"
+			}
+			tmpConfig.IsTorrentOK = true
 		}
 		line = fmt.Sprintf("%s = %s", key, value)
 		out += line + "\n"
@@ -209,6 +228,12 @@ func (c *Config) Save() error {
 		} else {
 			out += "auto_play = false\n"
 		}
+	}
+	if !tmpConfig.IsTorrentOK {
+		if c.IsTorrentOK {
+			out += "torrent_ok = true\n"
+		}
+		// no need to flag torrent ok if false
 	}
 
 	err = os.WriteFile(c.baseName+".ini", []byte(out), 0644)

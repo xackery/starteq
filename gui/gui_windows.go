@@ -11,7 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/xackery/launcheq/config"
+	"github.com/xackery/starteq/config"
+	"github.com/xackery/starteq/slog"
 	"github.com/xackery/wlk/walk"
 )
 
@@ -26,6 +27,7 @@ type Gui struct {
 	playButton  *walk.PushButton
 	progress    *walk.ProgressBar
 	log         *walk.TextEdit
+	isRunning   bool
 }
 
 var (
@@ -36,6 +38,7 @@ var (
 
 // NewMainWindow creates a new main window
 func NewMainWindow(ctx context.Context, cancel context.CancelFunc, cfg *config.Config, splash []byte) error {
+	//walk.SetDarkModeAllowed(true)
 	gui = &Gui{
 		ctx:    ctx,
 		cancel: cancel,
@@ -79,6 +82,7 @@ func NewMainWindow(ctx context.Context, cancel context.CancelFunc, cfg *config.C
 	gui.log.SetReadOnly(true)
 	gui.log.SetVisible(false)
 	gui.log.SetMinMaxSize(walk.Size{Width: 400, Height: 400}, walk.Size{Width: 400, Height: 400})
+	slog.AddHandler(Logf)
 	gui.mw.Children().Add(gui.log)
 
 	gui.patchButton, err = walk.NewPushButton(gui.mw)
@@ -142,6 +146,7 @@ func Run() int {
 	if gui == nil {
 		return 1
 	}
+	gui.isRunning = true
 	gui.mw.SetVisible(true)
 	return gui.mw.Run()
 }
@@ -276,15 +281,28 @@ func SetProgress(value int) {
 func MessageBox(title string, message string, isError bool) {
 	mu.Lock()
 	defer mu.Unlock()
-	if gui == nil {
-		return
+	owner := gui.mw
+	if gui == nil || !gui.isRunning {
+		owner = nil
 	}
 	// convert style to msgboxstyle
 	icon := walk.MsgBoxIconInformation
 	if isError {
 		icon = walk.MsgBoxIconError
 	}
-	walk.MsgBox(gui.mw, title, message, icon)
+	walk.MsgBox(owner, title, message, icon)
+}
+
+func MessageBoxYesNo(title string, message string) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	if gui == nil {
+		return false
+	}
+	// convert style to msgboxstyle
+	icon := walk.MsgBoxIconInformation
+	result := walk.MsgBox(gui.mw, title, message, icon|walk.MsgBoxYesNo)
+	return result == walk.DlgCmdYes
 }
 
 func MessageBoxf(title string, format string, a ...interface{}) {
@@ -314,4 +332,19 @@ func Close() {
 		return
 	}
 	gui.mw.Close()
+}
+
+func IsAutoMode() bool {
+	mu.Lock()
+	defer mu.Unlock()
+	return isAutoMode
+}
+
+func SetPatchText(text string) {
+	mu.Lock()
+	defer mu.Unlock()
+	if gui == nil {
+		return
+	}
+	gui.patchButton.SetText(text)
 }

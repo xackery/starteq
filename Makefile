@@ -29,6 +29,11 @@ run: sanitize
 	mkdir -p bin
 	cd bin && go run ../main.go
 
+run-windows: build-windows
+	@echo "run-windows: starting"
+	chmod +x bin/${NAME}.exe
+	cd bin && ./${NAME}.exe
+
 #go install github.com/tc-hib/go-winres@latest
 bundle:
 	go-winres simply --icon starteq.png
@@ -53,6 +58,6 @@ build-windows:
 	@echo "Building Windows ${VERSION}"
 	mkdir -p bin
 	go install github.com/akavel/rsrc@latest
-	rsrc -ico starteq.ico -manifest starteq.exe.manifest
+	#rsrc -ico starteq.ico -manifest starteq.exe.manifest
 	cp starteq.exe.manifest bin/
 	GOOS=windows GOARCH=amd64 go build -buildmode=pie -ldflags="-X main.Version=${VERSION} -X main.PatcherUrl=${PATCHER_URL} -s -w -H=windowsgui" -o bin/${NAME}.exe

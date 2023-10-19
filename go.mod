@@ -6,7 +6,7 @@ require (
 	github.com/anacrolix/torrent v1.53.1
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
 	github.com/fynelabs/selfupdate v0.1.0
-	github.com/xackery/wlk v0.0.8
+	github.com/xackery/wlk v0.0.9
 	gopkg.in/yaml.v3 v3.0.1
 )
 

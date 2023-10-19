@@ -189,7 +189,7 @@ func SubscribeAutoPlay(fn func()) {
 	gui.isAutoPlay.CheckedChanged().Attach(fn)
 }
 
-func SubscribeClose(fn func(cancelled *bool, reason walk.CloseReason)) {
+func SubscribeClose(fn func(cancelled *bool, reason byte)) {
 	mu.Lock()
 	defer mu.Unlock()
 	if gui == nil {
@@ -331,7 +331,9 @@ func Close() {
 	if gui == nil {
 		return
 	}
+
 	gui.mw.Close()
+	walk.App().Exit(0)
 }
 
 func IsAutoMode() bool {

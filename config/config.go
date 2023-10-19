@@ -55,7 +55,9 @@ func New(ctx context.Context, baseName string) (*Config, error) {
 	}
 
 	if isNewConfig {
-		cfg = &Config{}
+		cfg = &Config{
+			baseName: baseName,
+		}
 		err = cfg.Save()
 		if err != nil {
 			return nil, fmt.Errorf("save config: %w", err)

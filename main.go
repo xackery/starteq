@@ -13,15 +13,16 @@ import (
 	"github.com/xackery/starteq/config"
 	"github.com/xackery/starteq/gui"
 	"github.com/xackery/starteq/slog"
-	"github.com/xackery/wlk/walk"
 )
 
 //go:embed splash.png
 var starteqSplash []byte
 
 var (
-	Version    string
-	PatcherUrl string
+	// Version is the current version
+	Version string
+	// PatcherURL is the url to the patcher
+	PatcherURL string
 )
 
 func main() {
@@ -50,12 +51,12 @@ func main() {
 		gui.MessageBox("Error", "Failed to create main window: "+err.Error(), true)
 		os.Exit(1)
 	}
-	PatcherUrl = strings.TrimSuffix(PatcherUrl, "/")
+	PatcherURL = strings.TrimSuffix(PatcherURL, "/")
 	if Version == "" {
 		Version = "dev"
 	}
 
-	c, err := client.New(ctx, cancel, cfg, Version, PatcherUrl)
+	c, err := client.New(ctx, cancel, cfg, Version, PatcherURL)
 	if err != nil {
 		gui.MessageBox("Error", "Failed to create client: "+err.Error(), true)
 		os.Exit(1)
@@ -63,7 +64,7 @@ func main() {
 	defer slog.Dump(baseName + ".txt")
 	defer c.Done()
 
-	gui.SubscribeClose(func(canceled *bool, reason walk.CloseReason) {
+	gui.SubscribeClose(func(canceled *bool, reason byte) {
 		if ctx.Err() != nil {
 			fmt.Println("Accepting exit")
 			return
@@ -79,7 +80,6 @@ func main() {
 		fmt.Println("Doing clean up process...")
 		c.Done() // close client
 		gui.Close()
-		walk.App().Exit(0)
 		fmt.Println("Done, exiting")
 		slog.Dump(baseName + ".txt")
 		os.Exit(0)

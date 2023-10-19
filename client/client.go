@@ -1,6 +1,7 @@
 package client
 
 import (
+	"archive/zip"
 	"bufio"
 	"context"
 	"crypto/md5"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -35,7 +37,6 @@ type Client struct {
 	cfg           *config.Config
 	cacheFileList *FileList
 	version       string
-	cacheLog      string
 	httpClient    *http.Client
 	patchCtx      context.Context
 	patchCancel   context.CancelFunc
@@ -217,6 +218,7 @@ func (c *Client) PrePatch() error {
 }
 
 func (c *Client) Patch() error {
+	var err error
 	defer slog.Dump(c.baseName + ".txt")
 	if c.patchCtx != nil && c.patchCtx.Err() == nil {
 		slog.Print("Patch already in progress")
@@ -243,10 +245,12 @@ func (c *Client) Patch() error {
 	defer gui.SetPatchMode(false)
 	gui.SetProgress(0)
 
-	_, err := os.Stat("eqgame.exe")
-	if err != nil {
-		slog.Print("eqgame.exe must be in the same directory as %s.", c.baseName)
-		return fmt.Errorf("stat failed")
+	if runtime.GOOS == "windows" {
+		_, err = os.Stat("eqgame.exe")
+		if err != nil {
+			slog.Print("eqgame.exe must be in the same directory as %s.", c.baseName)
+			return fmt.Errorf("stat failed")
+		}
 	}
 
 	err = c.selfUpdateAndPatch()
@@ -575,13 +579,46 @@ func (c *Client) patch() error {
 }
 
 func (c *Client) downloadPatchFile(entry FileEntry) error {
-	slog.Print("%s (%s)", entry.Name, generateSize(entry.Size))
+	client := c.httpClient
+	if !isMapsDownloaded && strings.HasPrefix(strings.ToLower(entry.Name), "maps/") {
+		slog.Print("Downloading maps.zip...")
+		url := fmt.Sprintf("%s/maps.zip", c.patcherUrl)
+		resp, err := client.Get(url)
+		if err != nil {
+			return fmt.Errorf("download %s: %w", url, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return fmt.Errorf("download %s responded %d (not 200)", url, resp.StatusCode)
+		}
+
+		w, err := os.Create("maps.zip")
+		if err != nil {
+			return fmt.Errorf("create %s: %w", entry.Name, err)
+		}
+		defer w.Close()
+
+		_, err = io.Copy(w, resp.Body)
+		if err != nil {
+			return fmt.Errorf("write %s: %w", entry.Name, err)
+		}
+
+		//unzip it
+		err = unpack("maps.zip", ".")
+		if err != nil {
+			return fmt.Errorf("unzip %s: %w", entry.Name, err)
+		}
+
+		isMapsDownloaded = true
+		return nil
+	}
+	slog.Printf("%s (%s)\n", entry.Name, generateSize(entry.Size))
+
 	w, err := os.Create(entry.Name)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", entry.Name, err)
 	}
 	defer w.Close()
-	client := c.httpClient
 
 	url := fmt.Sprintf("%s/%s/%s", c.cacheFileList.DownloadPrefix, c.clientVersion, entry.Name)
 	resp, err := client.Get(url)
@@ -654,6 +691,54 @@ func (c *Client) fetchUsername() (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// unpack unzips the provided path
+func unpack(srcFile string, dstDir string) error {
+	ext := filepath.Ext(srcFile)
+	if ext != ".zip" {
+		return fmt.Errorf("invalid extension: %s", ext)
+	}
+	r, err := zip.OpenReader(srcFile)
+	if err != nil {
+		return fmt.Errorf("open: %w", err)
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		filePath := filepath.Join(dstDir, f.Name)
+		if f.FileInfo().IsDir() {
+			err := os.MkdirAll(filePath, os.ModePerm)
+			if err != nil {
+				return fmt.Errorf("mkdirall: %w", err)
+			}
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(filePath), os.ModePerm); err != nil {
+			return fmt.Errorf("mkdirall: %w", err)
+		}
+
+		outFile, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return fmt.Errorf("openfile: %w", err)
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			return fmt.Errorf("open: %w", err)
+		}
+
+		_, err = io.Copy(outFile, rc)
+		if err != nil {
+			return fmt.Errorf("copy: %w", err)
+		}
+
+		outFile.Close()
+		rc.Close()
+	}
+
+	return nil
 }
 
 func (c *Client) Done() error {

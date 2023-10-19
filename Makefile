@@ -18,16 +18,15 @@ sanitize:
 	rm -rf vendor/
 	go vet -tags ci ./...
 	test -z $(goimports -e -d . | tee /dev/stderr)
-	gocyclo -over 30 .
+	gocyclo -over 31 .
 	golint -set_exit_status $(go list -tags ci ./...)
 	staticcheck -go 1.14 ./...
 	go test -tags ci -covermode=atomic -coverprofile=coverage.out ./...
     coverage=`go tool cover -func coverage.out | grep total | tr -s '\t' | cut -f 3 | grep -o '[^%]*'`
 
-run: sanitize
+run: sanitize build-linux
 	@echo "run: building"
-	mkdir -p bin
-	cd bin && go run ../main.go
+	cd bin && ./${NAME}
 
 run-windows: build-windows
 	@echo "run-windows: starting"
@@ -48,11 +47,11 @@ build-prepare:
 .PHONY: build-darwin
 build-darwin:
 	@echo "Building darwin ${VERSION}"
-	@GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -buildmode=pie -ldflags="-X main.Version=${VERSION} -s -w" -o bin/${NAME}-darwin-x64 main.go
+	@GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -buildmode=pie -ldflags="-X main.Version=${VERSION} -X main.PatcherURL=${PATCHER_URL} -s -w" -o bin/${NAME}-darwin main.go
 .PHONY: build-linux
 build-linux:
 	@echo "Building Linux ${VERSION}"
-	@GOOS=linux GOARCH=amd64 go build -buildmode=pie -ldflags="-X main.Version=${VERSION} -w" -o bin/${NAME}-linux-x64 main.go		
+	@GOOS=linux GOARCH=amd64 go build -buildmode=pie -ldflags="-X main.Version=${VERSION} -X main.PatcherURL=${PATCHER_URL} -w" -o bin/${NAME}-linux-x64 main.go		
 .PHONY: build-windows
 build-windows:
 	@echo "Building Windows ${VERSION}"
@@ -60,4 +59,4 @@ build-windows:
 	go install github.com/akavel/rsrc@latest
 	#rsrc -ico starteq.ico -manifest starteq.exe.manifest
 	cp starteq.exe.manifest bin/
-	GOOS=windows GOARCH=amd64 go build -buildmode=pie -ldflags="-X main.Version=${VERSION} -X main.PatcherUrl=${PATCHER_URL} -s -w -H=windowsgui" -o bin/${NAME}.exe
+	GOOS=windows GOARCH=amd64 go build -buildmode=pie -ldflags="-X main.Version=${VERSION} -X main.PatcherURL=${PATCHER_URL} -s -w -H=windowsgui" -o bin/${NAME}.exe

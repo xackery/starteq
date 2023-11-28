@@ -173,6 +173,8 @@ func (c *Client) Play() error {
 }
 
 func (c *Client) PrePatch() error {
+	gui.SetPatchMode(true)
+	defer gui.SetPatchMode(false)
 	fmt.Println("Applying prepatch")
 	_, err := os.Stat("eqgame.exe")
 	if err != nil {

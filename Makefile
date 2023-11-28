@@ -31,7 +31,12 @@ run: sanitize build-linux
 run-windows: build-windows
 	@echo "run-windows: starting"
 	chmod +x bin/${NAME}.exe
+
+ifeq ($(shell uname), Windows)
 	cd bin && ./${NAME}.exe
+else
+	cd bin && wine64 ./${NAME}.exe
+endif
 
 #go install github.com/tc-hib/go-winres@latest
 bundle:

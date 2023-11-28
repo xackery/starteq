@@ -133,7 +133,7 @@ func NewMainWindow(ctx context.Context, cancel context.CancelFunc, cfg *config.C
 	}
 
 	gui.progress.SetMinMaxSize(walk.Size{Width: 400, Height: 39}, walk.Size{Width: 400, Height: 39})
-	gui.progress.SetValue(50)
+	gui.progress.SetValue(0)
 	gui.progress.SetMinMaxSize(walk.Size{Width: 400, Height: 39}, walk.Size{Width: 400, Height: 39})
 
 	gui.mw.Children().Add(gui.progress)
@@ -274,6 +274,12 @@ func SetProgress(value int) {
 	defer mu.Unlock()
 	if gui == nil {
 		return
+	}
+	if value > gui.progress.MaxValue() {
+		value = gui.progress.MaxValue()
+	}
+	if value < 0 {
+		value = 0
 	}
 	gui.progress.SetValue(value)
 }

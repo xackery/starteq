@@ -9,6 +9,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
+	"github.com/xackery/starteq/gui"
 	"github.com/xackery/starteq/slog"
 )
 
@@ -53,7 +54,8 @@ func (t *Torrent) Download(ctx context.Context, torrentData []byte) error {
 
 				totalPercent := float64(tr.BytesCompleted()) / float64(tr.Info().TotalLength()) * float64(100)
 
-				fmt.Printf("peers: %d, seeders: %d, %s/s %0.2f%% of %s, ETA %0.1f minutes\n",
+				gui.SetProgress(int(totalPercent))
+				slog.Printf("peers: %d, seeders: %d, %s/s %0.2f%% of %s, ETA %0.1f minutes\n",
 					st.ActivePeers,
 					st.ConnectedSeeders,
 					dataRate.HR(),
